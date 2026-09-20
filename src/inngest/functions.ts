@@ -35,7 +35,7 @@ export const runWorkflow = inngest.createFunction(
 
       // Terminal node: nothing to ask, the branch ends here.
       if (node.type === "result") {
-        await step.run(`result-${i}-${nodeId}`, () => {
+        await step.run(`result-${i}-${nodeId}`, async () => {
           await runStore.start(runId, nodeId, node.label);
           await runStore.record(runId, nodeId, node.label, undefined);
           await runStore.complete(runId, nodeId, `Reached "${node.label}"`);
