@@ -6,7 +6,12 @@ import type { LogLine } from "@/lib/types";
 
 export function LogsPanel({ logs, status }: { logs: LogLine[]; status?: string }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [logs.length]);
+  useEffect(() => {
+    // Return undefined explicitly so React 19's stricter commit-phase cleanup
+    // never sees scrollIntoView()'s return value (which historically varies
+    // across browser engines and is not a function).
+    end.current?.scrollIntoView({ block: "end" });
+  }, [logs.length]);
 
   return (
     <div className="flex h-full flex-col">
