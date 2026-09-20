@@ -13,7 +13,7 @@ export const runWorkflow = inngest.createFunction(
     retries: 3, // each failed step (LLM error / invalid answer) is retried by Inngest
     onFailure: async ({ event, error }) => {
       const runId = (event.data as { event: { data: RunEvent } }).event.data.runId;
-      runStore.fail(runId, error.message);
+      await runStore.fail(runId, error.message);
     },
   },
   { event: "workflow/run" },
@@ -36,9 +36,9 @@ export const runWorkflow = inngest.createFunction(
       // Terminal node: nothing to ask, the branch ends here.
       if (node.type === "result") {
         await step.run(`result-${i}-${nodeId}`, () => {
-          runStore.start(runId, nodeId, node.label);
-          runStore.record(runId, nodeId, node.label, undefined);
-          runStore.complete(runId, nodeId, `Reached "${node.label}"`);
+          await runStore.start(runId, nodeId, node.label);
+          await runStore.record(runId, nodeId, node.label, undefined);
+          await runStore.complete(runId, nodeId, `Reached "${node.label}"`);
         });
         path.push(nodeId);
         return { runId, path, finalNodeId: nodeId };

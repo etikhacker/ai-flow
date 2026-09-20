@@ -16,11 +16,11 @@ export async function POST(req: Request) {
   }
 
   const runId = randomUUID();
-  runStore.init(runId);
+  await runStore.init(runId);
   try {
     await inngest.send({ name: "workflow/run", data: { runId, graph, input } });
   } catch {
-    runStore.fail(runId, "Could not reach Inngest. Is `npm run inngest` running?");
+    await runStore.fail(runId, "Could not reach Inngest.");
     return NextResponse.json({ error: "Could not reach Inngest dev server" }, { status: 502 });
   }
   return NextResponse.json({ runId });
