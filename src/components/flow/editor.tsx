@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DecisionNode, ResultNode } from "./nodes";
 import { edgeTypes } from "./edges";
 import { LogsPanel } from "./logs-panel";
+import { EditorErrorBoundary } from "./editor-error-boundary";
 import {
   defaultEdges,
   defaultNodes,
@@ -30,7 +31,7 @@ import {
   STORAGE_KEY,
   toGraph,
 } from "@/lib/graph";
-import type { DecisionData, FlowEdge, FlowNode, NodeStatus, RunState } from "@/lib/types";
+import type { Answer, DecisionData, FlowEdge, FlowNode, NodeStatus, RunState } from "@/lib/types";
 
 const nodeTypes = { decision: DecisionNode, result: ResultNode };
 
@@ -39,12 +40,18 @@ const nodeTypes = { decision: DecisionNode, result: ResultNode };
  * read from the store, so they need a `ReactFlowProvider` somewhere up the tree.
  * Without it, polling-driven re-renders can corrupt the effect list and crash
  * the reconciler with "u is not a function" during commit.
+ *
+ * The EditorErrorBoundary catches any React rendering / commit error and
+ * remounts the editor subtree, so a transient third-party crash never leaves
+ * the user staring at a blank page.
  */
 export function Editor() {
   return (
-    <ReactFlowProvider>
-      <EditorInner />
-    </ReactFlowProvider>
+    <EditorErrorBoundary>
+      <ReactFlowProvider>
+        <EditorInner />
+      </ReactFlowProvider>
+    </EditorErrorBoundary>
   );
 }
 
@@ -216,21 +223,40 @@ function EditorInner() {
   const running = run?.status === "running";
 
   // ---- Visual execution state -------------------------------------------
+  // Important: return the SAME reference when nothing actually changed so
+  // that polling updates don't churn xyflow's internal effect list. A churn
+  // here crashes React 19's commit phase with "u is not a function".
   const viewNodes = useMemo(() => {
     if (!run) return nodes;
     const done = new Map(run.steps.map((s) => [s.nodeId, s]));
-    return nodes.map((n) => {
+    let anyChanged = false;
+    const next = nodes.map((n) => {
       let status: NodeStatus = "idle";
       if (done.has(n.id)) status = "done";
       if (run.activeNodeId === n.id) status = "running";
       if (run.status === "failed" && run.activeNodeId === n.id) status = "error";
-      return { ...n, data: { ...n.data, status, answer: done.get(n.id)?.answer } };
+      const answer = done.get(n.id)?.answer;
+      const curStatus = (n.data as { status?: NodeStatus }).status;
+      const curAnswer = (n.data as { answer?: Answer }).answer;
+      if (curStatus === status && curAnswer === answer) return n;
+      anyChanged = true;
+      return { ...n, data: { ...n.data, status, answer } };
     });
+    return anyChanged ? next : nodes;
   }, [nodes, run]);
 
   const viewEdges = useMemo(() => {
-    const taken = new Set(run?.steps.map((s) => s.edgeId).filter(Boolean));
-    return edges.map((e) => ({ ...e, data: { active: taken.has(e.id) } }));
+    if (!run) return edges;
+    const taken = new Set(run.steps.map((s) => s.edgeId).filter(Boolean));
+    let anyChanged = false;
+    const next = edges.map((e) => {
+      const active = taken.has(e.id);
+      const cur = (e.data as { active?: boolean } | undefined)?.active;
+      if (cur === active) return e;
+      anyChanged = true;
+      return { ...e, data: { active } };
+    });
+    return anyChanged ? next : edges;
   }, [edges, run]);
 
   const finalLabel = run?.finalNodeId ? nodes.find((n) => n.id === run.finalNodeId)?.data.label : null;
