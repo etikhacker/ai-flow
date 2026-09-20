@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 40 20% 98%;
+  --foreground: 222 25% 12%;
+  --muted: 40 12% 94%;
+  --muted-foreground: 222 10% 42%;
+  --border: 40 10% 86%;
+  --ring: 222 60% 45%;
+  --primary: 222 40% 16%;
+  --primary-foreground: 40 20% 98%;
+  --secondary: 40 12% 92%;
+  --secondary-foreground: 222 25% 12%;
+  --destructive: 0 70% 45%;
+  --yes: 152 60% 32%;
+  --no: 8 72% 48%;
+}
+
+* { border-color: hsl(var(--border)); }
+html, body { height: 100%; }
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+@keyframes dash { to { stroke-dashoffset: -20; } }
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--ring) / 0.45); }
+  50% { box-shadow: 0 0 0 6px hsl(var(--ring) / 0); }
+}
+.node-running { animation: pulse-ring 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .node-running, .edge-active { animation: none !important; }
+}
