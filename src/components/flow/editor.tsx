@@ -8,6 +8,7 @@ import {
   MarkerType,
   MiniMap,
   ReactFlow,
+  ReactFlowProvider,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -33,7 +34,21 @@ import type { DecisionData, FlowEdge, FlowNode, NodeStatus, RunState } from "@/l
 
 const nodeTypes = { decision: DecisionNode, result: ResultNode };
 
+/**
+ * Top-level wrapper. `useNodesState` / `useEdgesState` / `useReactFlow`
+ * read from the store, so they need a `ReactFlowProvider` somewhere up the tree.
+ * Without it, polling-driven re-renders can corrupt the effect list and crash
+ * the reconciler with "u is not a function" during commit.
+ */
 export function Editor() {
+  return (
+    <ReactFlowProvider>
+      <EditorInner />
+    </ReactFlowProvider>
+  );
+}
+
+function EditorInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(defaultNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>(defaultEdges);
   const [input, setInput] = useState("My invoice is wrong and I can't log in to my account.");
@@ -130,28 +145,54 @@ export function Editor() {
   };
 
   // ---- Execution ---------------------------------------------------------
-  const stopPolling = () => {
-    if (pollRef.current) clearTimeout(pollRef.current);
-  };
-  useEffect(() => stopPolling, []);
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  // Guard against polling-driven re-renders crashing if the component unmounts
+  // mid-flight or the network call throws synchronously.
+  const cancelledRef = useRef(false);
 
   const poll = useCallback((runId: string) => {
+    stopPolling();
+    cancelledRef.current = false;
     const tick = async () => {
+      if (cancelledRef.current) return;
       try {
-        const res = await fetch(`/api/runs/${runId}`);
+        const res = await fetch(`/api/runs/${runId}`, { cache: "no-store" });
+        if (cancelledRef.current) return;
         if (res.ok) {
           const state: RunState = await res.json();
+          if (cancelledRef.current) return;
           setRun(state);
           if (state.status !== "running") return;
+        } else if (res.status >= 500) {
+          // transient server error: back off instead of hot-looping
+          pollRef.current = setTimeout(tick, 2000);
+          return;
         }
-      } catch {}
-      pollRef.current = setTimeout(tick, 600);
+      } catch {
+        // network blip: back off and retry
+        if (!cancelledRef.current) pollRef.current = setTimeout(tick, 2000);
+        return;
+      }
+      if (!cancelledRef.current) pollRef.current = setTimeout(tick, 600);
     };
     tick();
-  }, []);
+  }, [stopPolling]);
 
   const start = async () => {
     stopPolling();
+    cancelledRef.current = false;
     setError(null);
     setRun(null);
     const res = await fetch("/api/run", {
@@ -159,9 +200,17 @@ export function Editor() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ graph: toGraph(nodes, edges), input }),
     });
-    const body = await res.json();
-    if (!res.ok) return setError(body.error ?? "Failed to start run");
-    poll(body.runId);
+    let body: { runId?: string; error?: string } = {};
+    try {
+      body = await res.json();
+    } catch {
+      body = { error: `Server returned ${res.status}` };
+    }
+    if (!res.ok) {
+      setError(body.error ?? `Failed to start run (${res.status})`);
+      return;
+    }
+    if (body.runId) poll(body.runId);
   };
 
   const running = run?.status === "running";
